@@ -14,10 +14,12 @@ connectDB();
 
 // normal routes
 app.get('/', (req, res) => {
-  res.send("<h2>Page Not Found!!</h2>")
-})
+  res.send("<h2>Page Not Found!!</h2>");
+});
+
 app.use("/api", userRoutes);
 
-server.listen(process.env.PORT, () => {
-  console.log(`Server running on localhost:${process.env.PORT}`);
+// यहाँ से फालतू टेक्स्ट हटा दिया गया है
+app.listen(process.env.PORT, () => {
+  console.log(`Server running on port: ${process.env.PORT}`);
 });
