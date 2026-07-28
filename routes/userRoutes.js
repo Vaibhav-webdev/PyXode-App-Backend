@@ -1,52 +1,83 @@
-import express from "express";
-import User from "../models/User.js"
-import { verifyWebhook } from "@clerk/express/webhooks";
+import express from 'express';
+import { OAuth2Client } from 'google-auth-library';
+import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
 
 const router = express.Router();
+const googleClient = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
 
-router.post('/webhooks', express.raw({ type: 'application/json' }), async (req, res) => {
+router.post('/google', async (req, res) => {
   try {
-    const evt = await verifyWebhook(req)
+    const { idToken } = req.body;
 
-    const { id } = evt.data
-    const eventType = evt.type
-
-    if (eventType === "user.created") {
-      await User.findOneAndUpdate(
-        { clerkId: evt.data.id },
-        {
-          clerkId: evt.data.id,
-          email: evt.data.email_addresses[0]?.email_address,
-          firstName: evt.data.first_name,
-          lastName: evt.data.last_name,
-          image: evt.data.image_url,
-        },
-        { upsert: true, new: true }
-      );
+    if (!idToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'idToken nahi mila.',
+      });
     }
 
-    if (eventType === "user.deleted") {
-      await User.findOneAndDelete({ clerkId: data.id });
+    // STEP 1: Google Token Verify Karo
+    const ticket = await googleClient.verifyIdToken({
+      idToken: idToken,
+      audience: process.env.GOOGLE_WEB_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    
+    // Google payload se required fields nikalein
+    const { 
+      sub: googleId, 
+      email, 
+      given_name, 
+      family_name, 
+      picture,
+      name 
+    } = payload;
+
+    // STEP 2: Database me Check/Create Karo (Schema fields ke hisaab se)
+    let user = await User.findOne({ googleId });
+
+    if (!user) {
+      // Schema ke `firstName`, `lastName`, aur `image` fields me map kar rahe hain
+      user = await User.create({
+        googleId,
+        email,
+        firstName: given_name || name?.split(' ')[0] || '',
+        lastName: family_name || name?.split(' ').slice(1).join(' ') || '',
+        image: picture || '',
+      });
+      console.log('New user created in MongoDB:', email);
+    } else {
+      console.log('Existing user logged in:', email);
     }
 
-    if (evt.type === "user.updated") {
-      const data = evt.data;
+    // STEP 3: Session JWT Generate Karo
+    const appToken = jwt.sign(
+      { userId: user._id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '30d' }
+    );
 
-      await User.findOneAndUpdate(
-        { clerkId: data.id },
-        {
-          image: data.image_url,
-          firstName: data.first_name,
-          lastName: data.last_name
-        }
-      );
-    }
-
-    res.status(200).json({ success: true });
-  } catch (err) {
-    console.error('Error verifying webhook:', err)
-    return res.status(400).send('Error verifying webhook')
+    // STEP 4: Response Bhejo
+    return res.status(200).json({
+      success: true,
+      token: appToken,
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        image: user.image,
+      },
+    });
+  } catch (error) {
+    console.error('Google Auth Error:', error.message);
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid or Expired Google Token',
+    });
   }
-})
+});
 
 export default router;

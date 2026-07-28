@@ -19,7 +19,6 @@ app.get('/', (req, res) => {
 
 app.use("/api", userRoutes);
 
-// यहाँ से फालतू टेक्स्ट हटा दिया गया है
 app.listen(process.env.PORT, () => {
   console.log(`Server running on port: ${process.env.PORT}`);
 });
